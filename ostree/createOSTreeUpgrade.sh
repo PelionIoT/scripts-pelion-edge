@@ -17,6 +17,8 @@
 
 # TODO: add settings section to group all the hardcoded paths and values
 
+execdir="$(readlink -e "$(dirname "$0")")"
+
 # Output a message if verbose mode is on
 blab() {
     [ "$VERBOSE" = 1 ] && echo "$@"
@@ -124,7 +126,7 @@ ostree_diff_partition() {
     }
 
     blab Running OSTree difftool
-    sudo ./ostree-delta.py --repo "$workdir/old/ostree/repo" --output $workdir/delta --update_repo "$workdir/new/ostree/repo"
+    sudo ${execdir}/ostree-delta.py --repo "$workdir/old/ostree/repo" --output $workdir/delta --update_repo "$workdir/new/ostree/repo"
 
     umount_wic_partition "$workdir/old"
     umount_wic_partition "$workdir/new"
