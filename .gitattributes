@@ -2,4 +2,4 @@
 *            text=auto
 *.md         text diff=markdown
 *.sh         text
-
+*.py         text
