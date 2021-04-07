@@ -32,7 +32,7 @@ require_binaries() {
     for b in "$@"; do
         type "$b" >/dev/null 2>&1 || {
             echo >&2 "Please make sure binary $b is installed and available in the path."
-	    let retval++
+            let retval++
         }
     done
     return $retval
@@ -93,7 +93,7 @@ mount_wic_partition() {
 
     mkdir -p "${mount_point}"
     blab Mounting wic partition "$partition_number" of "$wic_file" to "$mount_point"
-    sudo mount -o loop,rw,offset=$((512*${start_sector})),sizelimit=$((512*${sector_count})) -t ${partition_type} "${wic_file}" "${mount_point}"
+    sudo mount -o loop,rw,offset=$((512*start_sector)),sizelimit=$((512*sector_count)) -t ${partition_type} "${wic_file}" "${mount_point}"
 }
 
 # Convenience/symmetry function
@@ -126,7 +126,7 @@ ostree_diff_partition() {
     }
 
     blab Running OSTree difftool
-    sudo ${execdir}/ostree-delta.py --repo "$workdir/old/ostree/repo" --output $workdir/delta --update_repo "$workdir/new/ostree/repo"
+    sudo "${execdir}/ostree-delta.py" --repo "$workdir/old/ostree/repo" --output "$workdir/delta" --update_repo "$workdir/new/ostree/repo"
 
     umount_wic_partition "$workdir/old"
     umount_wic_partition "$workdir/new"
@@ -159,56 +159,135 @@ cleanup() {
 #     1 - oldwic:      .wic file of the base or factory build to be upgraded
 #     2 - newwic:      .wic file of the new or upgrade build
 #     3 - outputfile:  filename of the output tarball
-# Output:
-#     <tag>-field-upgradeupdate.tar.gz
-main() {
+create_delta_between_wic_files() {
     local oldwic="$1"
     local newwic="$2"
     local outputfile="$3"
-    local success=1
 
-    [ -f "${oldwic}" ] && [ -f "${newwic}" ] && [ -n "${outputfile}" ] || {
-        echo >&2 "Usage: sudo createOSTreeUpgrade.sh [--verbose] <old_wic_file> <new_wic_file> [upgrade_tag]"
+
+    ([ -f "${oldwic}" ] && [ -f "${newwic}" ] && [ -n "${outputfile}" ]) || {
+        echo >&2 ""
+        [ -f "${oldwic}" ]     || echo >&2 "Error: Base image not found"
+        [ -f "${newwic}" ]     || echo >&2 "Error: Upgrade image not found"
+        [ -n "${outputfile}" ] || echo >&2 "Error: outputfile not provided"
+        echo >&2 ""
+
+        echo >&2 "Usage: sudo createOSTreeUpgrade.sh [--verbose] [--empty] <old_wic_file> <new_wic_file> <outputfile>"
         echo >&2 "    old_wic_file        - base image for upgrade"
         echo >&2 "    new_wic_file        - image to upgrade to"
         echo >&2 "    output_file         - filename of the output tarball"
         return 1
     }
 
-    # Make sure we have all the binaries we need; gzcat can be substituted
-    type gzcat >/dev/null 2>&1 || gzcat() { gzip -c -d -f "$@"; }
-    require_binaries gzip gzcat xz tar openssl md5sum grep rsync mount umount fdisk sfdisk ostree || return 2
-
-    # TODO: Right now, commands run as sudo (e.g. rsync) create files with root as owner, thus requiring pretty much the entire remaining script to be run as root as well. Fix it.
-    # Ensure we are running as root
-    [ $(id -u) -ne 0 ] && {
-        echo >&2 "Please run as root"
-        return 3
-    }
-
-    # Create tmp working space
-    setupTemp
-
-    md5sum $oldwic | awk -v srch="$oldwic" -v repl="$newwic" '{ sub(srch,repl,$0); print $0 }' > ${TMPDIR}/chksum.txt
-    md5sum -c ${TMPDIR}/chksum.txt 2>/dev/null | grep -q "OK" && {
+    md5sum "$oldwic" | awk -v srch="$oldwic" -v repl="$newwic" '{ sub(srch,repl,$0); print $0 }' > "${TMPDIR}/chksum.txt"
+    md5sum -c "${TMPDIR}/chksum.txt" 2>/dev/null | grep -q "OK" && {
         echo >&2 "Base image and result image are the same! Please make sure they are different."
         return 4
     }
 
     # If input wic files are gzipped, gunzip them otherwise copy them as is
-    gzcat -f "$oldwic" > ${TMPDIR}/old_wic
-    gzcat -f "$newwic" > ${TMPDIR}/new_wic
+    gzcat -f "$oldwic" > "${TMPDIR}/old_wic"
+    gzcat -f "$newwic" > "${TMPDIR}/new_wic"
 
-    ostree_diff_partition ${TMPDIR}/old_wic ${TMPDIR}/new_wic 2 || {
-            success=0
-            break
-        }
+    ostree_diff_partition "${TMPDIR}/old_wic" "${TMPDIR}/new_wic" 2
 
-    mv ${TMPDIR}/delta/data.tar.gz ${outputfile}
+    mv "${TMPDIR}/delta/data.tar.gz" "${outputfile}"
 
-    # Cleanup the temp working space
-    cleanup
 }
 
-[ "$1" = "--verbose" ] && VERBOSE=1 && TARVFLAG=v && shift
-main "$@"
+
+create_delta_from_scratch() {
+    local wicfile="$1"
+    local outputfile="$2"
+
+    ([ -f "${wicfile}" ] && [ -n "${outputfile}" ]) || {
+        echo >&2 ""
+        [ -f "${wicfile}" ]     || echo >&2 "Error: Base image not found"
+        [ -n "${outputfile}" ] || echo >&2 "Error: outputfile not provided"
+        echo >&2 ""
+
+        echo >&2 "Usage: sudo createOSTreeUpgrade.sh [--verbose] [--empty] <wic_file> <outputfile>"
+        echo >&2 "    old_wic_file        - base image for upgrade"
+        echo >&2 "    output_file         - filename of the output tarball"
+        return 1
+    }
+
+
+    # If input wic files are gzipped, gunzip them otherwise copy them as is
+    gzcat -f "$wicfile" > "${TMPDIR}/wicfile"
+
+    blab "===> Diffing partition $partition"
+
+    mount_wic_partition "${TMPDIR}/wicfile" 2 "${TMPDIR}/wic" || return 1
+
+    blab Running OSTree difftool
+    sudo "${execdir}/ostree-delta.py" --repo "${TMPDIR}/wic/ostree/repo" --output "${TMPDIR}/delta" --empty
+
+    umount_wic_partition "${TMPDIR}/wic"
+
+    mv "${TMPDIR}/delta/data.tar.gz" "${outputfile}"
+}
+
+empty=0
+
+args_list="empty,verbose"
+
+args=$(getopt -o+ho:x -l $args_list -n "$(basename "$0")" -- "$@")
+eval set -- "$args"
+
+while [ $# -gt 0 ]; do
+  if [ -n "${opt_prev:-}" ]; then
+    eval "$opt_prev=\$1"
+    opt_prev=
+    shift 1
+    continue
+  elif [ -n "${opt_append:-}" ]; then
+    eval "$opt_append=\"\${$opt_append:-} \$1\""
+    opt_append=
+    shift 1
+    continue
+  fi
+  case $1 in
+  --empty)
+    empty=1
+    ;;
+
+  --verbose)
+    VERBOSE=1
+    ;;
+
+  -x)
+    set -x
+    ;;
+
+  --)
+    shift
+    break 2
+    ;;
+  esac
+  shift 1
+done
+
+# Make sure we have all the binaries we need; gzcat can be substituted
+type gzcat >/dev/null 2>&1 || gzcat() { gzip -c -d -f "$@"; }
+require_binaries gzip gzcat xz tar openssl md5sum grep rsync mount umount fdisk sfdisk ostree || return 2
+
+# TODO: Right now, commands run as sudo (e.g. rsync) create files with root as owner, thus requiring pretty much the entire remaining script to be run as root as well. Fix it.
+# Ensure we are running as root
+[ "$(id -u)" -ne 0 ] && {
+    echo >&2 "Please run as root"
+    return 3
+}
+
+# Create tmp working space
+setupTemp
+
+# Create the delta file.
+if [ "$empty" = 1 ]; then
+    create_delta_from_scratch "$@"
+else
+    create_delta_between_wic_files "$@"
+fi
+
+# Cleanup the temp working space
+cleanup "${TMPDIR}"
