@@ -1,0 +1,4 @@
+# Ignore following files by default from git commits.
+# You can still use --force to them, if you really want.
+*.tar.gz
+
