@@ -130,6 +130,9 @@ def _get_version_from_repo(repo, machine):
     # Get the version from the repo
     return _get_data_from_repo(repo, machine, "Version")
 
+def _get_date_from_repo(repo, machine):
+    # Get the date from the repo
+    return _get_data_from_repo(repo, machine, "Date")
 
 def _get_date_from_repo(repo, machine):
     # Get the date from the repo
