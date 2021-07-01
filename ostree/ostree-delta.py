@@ -15,10 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Script to create a static delta bteween 2 ostree repos.
-
-"""
+"""Script to create a static delta between 2 ostree repos."""
 
 import argparse
 import os
@@ -30,9 +27,13 @@ import warnings
 import tarfile
 
 
-def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+def warning_on_one_line(
+    message, category, filename, lineno, file=None, line=None
+):
     """Format a warning the standard way."""
-    return "{}:{}: {}: {}\n".format(filename, lineno, category.__name__, message)
+    return "{}:{}: {}: {}\n".format(
+        filename, lineno, category.__name__, message
+    )
 
 
 def warning(message):
@@ -81,12 +82,20 @@ def _determine_machine_from_repo(repo):
 
     machine = None
 
-    # Search through the refs and take the first one that doesn't start
-    # with "ostree". This will be the base repo.
+    # Search through the refs and remove any elements that start with "ostree"
     for ref in output:
-        if not ref.startswith("ostree"):
-            machine = ref
-            break
+        if ref.startswith("ostree"):
+            output.remove(ref)
+
+    # There should only be one ref remaining - the machine name. Anything else
+    # is an error.
+    if len(output) == 1:
+        machine = output[0]
+    else:
+        print("Error:\tCould not determine the machine name from the repo")
+        print("\tPossible values are:")
+        for ref in output:
+            print("\t\t{}".format(ref))
     return machine
 
 
@@ -100,7 +109,8 @@ def _get_data_from_repo(repo, machine, data):
     for line in output:
 
         if line.startswith(data):
-            #Date variable requires specific parsing since it contains spaces and colons
+            # Date variable requires specific parsing since it contains
+            # spaces and colons
             if data == "Date":
                 values.append(line.split(":", 1)[1].strip())
             else:
@@ -124,8 +134,14 @@ def _get_date_from_repo(repo, machine):
     # Get the date from the repo
     return _get_data_from_repo(repo, machine, "Date")
 
+def _get_date_from_repo(repo, machine):
+    # Get the date from the repo
+    return _get_data_from_repo(repo, machine, "Date")
+
+
 def _generate_metadata(outputpath, from_sha, to_sha):
-    # Save the from and to shas into a file. They will be needed on the device at the deploy stage.
+    # Save the from and to shas into a file.  # They will be needed on the
+    # device at the deploy stage.
     with open(os.path.join(outputpath, "metadata"), "w") as metafile:
         metafile.write("From-sha:{}\n".format(from_sha))
         metafile.write("To-sha:{}\n".format(to_sha))
@@ -158,15 +174,13 @@ def _generate_static_delta_between_repos(
 
     Args:
     * repo        (Path): Initial (deployed) repository.
-    * update_repo (Path): New (update) repository. 
+    * update_repo (Path): New (update) repository.
     * outputpath  (Path): output folder.
     * commit,
     * machine,
     * update_sha,
     * from_sha,
-
     """
-
     # Get the sha from the new repo
     shas = _get_shas_from_repo(update_repo, machine)
 
@@ -194,7 +208,11 @@ def _generate_static_delta_between_repos(
         from_sha = shas[0]
     else:
         if from_sha not in shas:
-            warning("sha {} not found in {} for ref {}".format(from_sha, repo, machine))
+            warning(
+                "sha {} not found in {} for ref {}".format(
+                    from_sha, repo, machine
+                )
+            )
             exit(1)
 
     print(from_sha)
@@ -261,7 +279,61 @@ def _generate_static_delta_between_repos(
     _generate_tarball(outputpath)
 
 
-def _generate_static_delta_between_shas(repo, outputpath, machine, to_sha, from_sha):
+def _generate_empty_static_delta(repo, outputpath, machine, to_sha):
+    """
+    Generate the static delta information.
+
+    Args:
+    * repo        (Path): Initial (deployed) repository.
+    * outputpath  (Path): output folder.
+    * machine,
+    """
+    shas = _get_shas_from_repo(repo, machine)
+
+    if to_sha is None:
+        to_sha = shas[0]
+    else:
+        if to_sha not in shas:
+            warning(
+                "sha {} not found in {} for ref {}".format(
+                    to_sha, repo, machine
+                )
+            )
+            exit(1)
+
+    # set the from_sha to be the machine name. The deploy script on the device
+    # will sanity check that the machine is present in the device repo.
+    from_sha = machine
+
+    _generate_metadata(outputpath, from_sha, to_sha)
+
+    output_filename = os.path.join(outputpath, "superblock")
+
+    # Generate the static delta.
+    # the max-chunk-size gives the delta in a single data file, called 0
+    command = [
+        "ostree",
+        "--repo={}".format(repo),
+        "static-delta",
+        "generate",
+        machine,
+        "--max-chunk-size=2048",
+        "--min-fallback-size=0",
+        "--filename={}".format(output_filename),
+        "--to",
+        to_sha,
+        "--empty",
+    ]
+    output = _execute_command(command)
+    print(output)
+
+    # Create a tarball.
+    _generate_tarball(outputpath)
+
+
+def _generate_static_delta_between_shas(
+    repo, outputpath, machine, to_sha, from_sha
+):
     """
     Generate the static delta information.
 
@@ -271,9 +343,7 @@ def _generate_static_delta_between_shas(repo, outputpath, machine, to_sha, from_
     * machine,
     * to_sha,
     * from_sha,
-
     """
-
     shas = _get_shas_from_repo(repo, machine)
 
     if len(shas) < 2:
@@ -284,14 +354,22 @@ def _generate_static_delta_between_shas(repo, outputpath, machine, to_sha, from_
         to_sha = shas[0]
     else:
         if to_sha not in shas:
-            warning("sha {} not found in {} for ref {}".format(to_sha, repo, machine))
+            warning(
+                "sha {} not found in {} for ref {}".format(
+                    to_sha, repo, machine
+                )
+            )
             exit(1)
 
     if from_sha is None:
         from_sha = shas[1]
     else:
         if from_sha not in shas:
-            warning("sha {} not found in {} for ref {}".format(from_sha, repo, machine))
+            warning(
+                "sha {} not found in {} for ref {}".format(
+                    from_sha, repo, machine
+                )
+            )
             exit(1)
 
     _generate_metadata(outputpath, from_sha, to_sha)
@@ -384,7 +462,10 @@ def _parse_args():
     )
 
     parser.add_argument(
-        "--to_sha", type=str, help="sha of the tip of the delta image", required=False
+        "--to_sha",
+        type=str,
+        help="sha of the tip of the delta image",
+        required=False,
     )
 
     parser.add_argument(
@@ -406,6 +487,14 @@ def _parse_args():
         "--generate_bin",
         action="store_true",
         help="Create a .bin file instead of .tar.gz",
+        default=False,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--empty",
+        action="store_true",
+        help="Create a clean static delta.",
         default=False,
         required=False,
     )
@@ -433,15 +522,28 @@ def main():
     else:
         machine = args.machine
 
+    if machine is None:
+        sys.exit(2)
+
     if args.update_repo is None:
-        print(_generate_static_delta_between_shas)
-        _generate_static_delta_between_shas(
-            repo=args.repo,
-            outputpath=args.output,
-            machine=machine,
-            to_sha=args.to_sha,
-            from_sha=args.from_sha,
-        )
+        if args.empty:
+
+            print(_generate_empty_static_delta)
+            _generate_empty_static_delta(
+                repo=args.repo,
+                outputpath=args.output,
+                machine=machine,
+                to_sha=args.to_sha,
+            )
+        else:
+            print(_generate_static_delta_between_shas)
+            _generate_static_delta_between_shas(
+                repo=args.repo,
+                outputpath=args.output,
+                machine=machine,
+                to_sha=args.to_sha,
+                from_sha=args.from_sha,
+            )
     else:
         print(_generate_static_delta_between_repos)
         _generate_static_delta_between_repos(
@@ -455,7 +557,8 @@ def main():
         )
 
     if args.generate_bin:
-        # Rename the tar-gz file to .bin to avoid a "feature" with manifest generation.
+        # Rename the tar-gz file to .bin to avoid a "feature" with manifest
+        # generation.
         command = [
             "mv",
             "{}/data.tar.gz".format(args.output),
